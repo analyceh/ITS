@@ -12,150 +12,197 @@ def epoch_to_datetime(x): # convert epoch values from DARMA to datetime values w
     return datetime.datetime.fromtimestamp(x) # handled as timestamps
     #return datetime.datetime.fromtimestamp(x).strftime('%Y-%m-%d %H:%M:%S') # handled as strings => not practical
 
-def VCON_conversion():
-    print("converting VCON")
-    input_file = "test_L5_31_vcon.txt"
-    output_file = "test_L5_31_vcon_processed.txt"
+def get_input_file():
+    input_file = input("Enter input file name containing VCON, VMON, and IMON data: ")
+    return input_file
+
+def get_output_filename(input_file):
+    # Split filename and extension
+    name, ext = os.path.splitext(input_file)
+    return f"{name}_processed{ext}"
+
+def process_data(input_file):
+    print("Processing data from combined file")
     
-    # First read and sort the file
-    try:
-        with open(input_file, 'r') as f:
-            lines = f.readlines()
-        # Sort lines by the timestamp (first field before semicolon)
-        sorted_lines = sorted(lines, key=lambda x: float(x.split(';')[0]))
-        
-        # Write sorted lines to a temporary file
-        with open('temp_sorted.txt', 'w') as f:
-            f.writelines(sorted_lines)
-        
-        # Now process the sorted file with PowerShell
-        sed_command = f'powershell -Command "Get-Content temp_sorted.txt | ForEach-Object {{$_ -replace \'^(.*?);.*?;(.*?)$\', \'$1;$2\'}} | Set-Content {output_file}"'
-        subprocess.run(sed_command, shell=True, check=True)
-        os.remove('temp_sorted.txt')  # Clean up temporary file
-        print(f"File processed successfully. Output saved to {output_file}")
-    except Exception as e:
-        print(f"Error processing file: {e}")
-
-def VMON_conversion():
-    print("converting VMON")
-    input_file = "test_L5_31_vmon.txt"
-    output_file = "test_L5_31_vmon_processed.txt"
+    # Dictionary to store data by channel
+    channel_data = {}
     
-    try:
-        with open(input_file, 'r') as f:
-            lines = f.readlines()
-        sorted_lines = sorted(lines, key=lambda x: float(x.split(';')[0]))
-        
-        with open('temp_sorted.txt', 'w') as f:
-            f.writelines(sorted_lines)
-        
-        sed_command = f'powershell -Command "Get-Content temp_sorted.txt | ForEach-Object {{$_ -replace \'^(.*?);.*?;(.*?)$\', \'$1;$2\'}} | Set-Content {output_file}"'
-        subprocess.run(sed_command, shell=True, check=True)
-        os.remove('temp_sorted.txt')
-        print(f"File processed successfully. Output saved to {output_file}")
-    except Exception as e:
-        print(f"Error processing file: {e}")
-
-def IMON_conversion():
-    print("converting IMON")
-    input_file = "test_L5_31_imon.txt"
-    output_file = "test_L5_31_imon_processed.txt"
+    # Debug: Print raw data example
+    # print("\nFirst 5 lines of input file:")
+    # with open(input_file, 'r') as f:
+    #     for i, line in enumerate(f):
+    #         if i < 5:
+    #             print(line.strip())
+    #             parts = line.strip().split(';')
+    #             print(f"Split parts: {parts}")
+    #             if 'channel' in parts[1]:
+    #                 channel = parts[1].split('channel')[1][:3]
+    #                 print(f"Extracted channel: {channel}")
+    #                 print(f"Type detection: {'vMon' if 'vMon' in parts[1] else 'vCon' if 'vCon' in parts[1] else 'iMon' if 'iMon' in parts[1] else 'unknown'}")
     
-    try:
-        with open(input_file, 'r') as f:
-            lines = f.readlines()
-        sorted_lines = sorted(lines, key=lambda x: float(x.split(';')[0]))
+    with open(input_file, 'r') as f:
+        for line in f:
+            parts = line.strip().split(';')
+            if len(parts) >= 2:
+                timestamp = float(parts[0])
+                value = float(parts[2])
+                
+                # Extract channel number with debug output
+                channel = None
+                if 'channel' in parts[1]:
+                    channel = parts[1].split('channel')[1][:3]
+                    
+                    # Extract measurement type more reliably
+                    measurement_type = 'unknown'
+                    if 'actual.vMon' in parts[1]:
+                        measurement_type = 'vMon'
+                    elif 'actual.vCon' in parts[1]:
+                        measurement_type = 'vCon'
+                    elif 'actual.iMon' in parts[1]:
+                        measurement_type = 'iMon'
+                        
+                    if measurement_type == 'unknown':
+                        print(f"Warning: Unknown measurement type in line: {parts[1]}")
+
+                if channel:
+                    if channel not in channel_data:
+                        channel_data[channel] = {'vMon': [], 'vCon': [], 'iMon': []}
+                        print(f"Created new channel entry for channel {channel}")
+                    
+                    if 'vmon' in parts[1].lower():
+                        channel_data[channel]['vMon'].append((timestamp, value))
+                    elif 'vcon' in parts[1].lower():
+                        channel_data[channel]['vCon'].append((timestamp, value))
+                    elif 'imon' in parts[1].lower():
+                        channel_data[channel]['iMon'].append((timestamp, value))
+    
+    # Debug: Print data counts for each channel
+    # for channel, data in channel_data.items():
+    #     print(f"\nChannel {channel} data counts:")
+    #     print(f"VMON points: {len(data['vMon'])}")
+    #     print(f"VCON points: {len(data['vCon'])}")
+    #     print(f"IMON points: {len(data['iMon'])}")
+    
+    # Create individual plots for each channel
+    for idx, (channel, data) in enumerate(channel_data.items()):
+        # Convert to DataFrames
+        vCon_df = pd.DataFrame(data['vCon'], columns=['timestamp', 'value'])
+        vMon_df = pd.DataFrame(data['vMon'], columns=['timestamp', 'value'])
+        iMon_df = pd.DataFrame(data['iMon'], columns=['timestamp', 'value'])
         
-        with open('temp_sorted.txt', 'w') as f:
-            f.writelines(sorted_lines)
+        # Debug: Print DataFrame sizes
+        print(f"\nDataFrame sizes for channel {channel}:")
+        print(f"VCON: {len(vCon_df)}")
+        print(f"VMON: {len(vMon_df)}")
+        print(f"IMON: {len(iMon_df)}")
         
-        sed_command = f'powershell -Command "Get-Content temp_sorted.txt | ForEach-Object {{$_ -replace \'^(.*?);.*?;(.*?)$\', \'$1;$2\'}} | Set-Content {output_file}"'
-        subprocess.run(sed_command, shell=True, check=True)
-        os.remove('temp_sorted.txt')
-        print(f"File processed successfully. Output saved to {output_file}")
-    except Exception as e:
-        print(f"Error processing file: {e}")
+        # Convert timestamps
+        for df in [vCon_df, vMon_df, iMon_df]:
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+        
+        # Merge dataframes
+        first_merge = pd.merge_asof(vCon_df.sort_values('timestamp'),
+                                   vMon_df.sort_values('timestamp'),
+                                   on='timestamp',
+                                   suffixes=('_vCon', '_vMon'))
+        
+        merged_df = pd.merge_asof(first_merge,
+                                 iMon_df.sort_values('timestamp'),
+                                 on='timestamp')
+        
+        # Calculate resistance with zero current check
+        merged_df['resistance'] = float('nan')  # Initialize with NaN
+        # Create boolean mask for non-zero current values
+        # merged_df['value'] != 0 creates an array like:
+        # [True, True, False, True, False, True, ...]
+        # where True means current is non-zero
+        non_zero_current = merged_df['value'] != 0
+        
+        # We can use this mask to select only the rows we want:
+        # merged_df.loc[non_zero_current, 'resistance'] will only
+        # operate on rows where non_zero_current is True
+        merged_df.loc[non_zero_current, 'resistance'] = (
+            (merged_df.loc[non_zero_current, 'value_vCon'] - 
+             merged_df.loc[non_zero_current, 'value_vMon']) / 
+             merged_df.loc[non_zero_current, 'value']
+        )
 
-def graph_each():
-    print("graphing each")
-    # Read the processed files
-    vcon_df = pd.read_csv("test_L5_31_vcon_processed.txt", sep=';', header=None, names=['timestamp', 'value'])
-    vmon_df = pd.read_csv("test_L5_31_vmon_processed.txt", sep=';', header=None, names=['timestamp', 'value'])
-    imon_df = pd.read_csv("test_L5_31_imon_processed.txt", sep=';', header=None, names=['timestamp', 'value'])
+        # Filter unrealistic values and NaN
+        filtered_df = merged_df[
+            (merged_df['resistance'] >= 0.1) & 
+            (merged_df['resistance'] <= 0.5) &
+            (merged_df['resistance'].notna())
+        ].copy()
+        
+        # Debug: Print merge results
+        print(f"After first merge: {len(first_merge)} rows")
+        print(f"After final merge: {len(merged_df)} rows")
+        print(f"After filtering: {len(filtered_df)} rows")
+        
+        if len(filtered_df) == 0:
+            print("Warning: No data points after filtering!")
+            print("Sample of resistance values:", merged_df['resistance'].head())
+            print("Min resistance:", merged_df['resistance'].min())
+            print("Max resistance:", merged_df['resistance'].max())
+            
+        print(f"\nChannel {channel}:")
+        print(f"Filtered out {len(merged_df) - len(filtered_df)} unrealistic resistance values")
+        print(f"Remaining measurements: {len(filtered_df)}")
+        
+        # Create new figure for each channel
+        plt.figure(figsize=(10, 6))
+        plt.plot(filtered_df['timestamp'], filtered_df['resistance'],
+                color='purple', marker='.', markersize=2, 
+                linestyle='-', linewidth=1)
+        
+        plt.xlabel('Time')
+        plt.ylabel('Resistance (Ω)')
+        plt.ylim([0.18, 0.22])
+        plt.grid(True)
+        plt.tight_layout()
+        stave_label = input(f"Enter stave label for Channel {channel} plot title: ")
+        plt.title(f'Cable Resistance over Time - Stave {stave_label}, Channel {channel}, Filtered: 0.1 ≤ R ≤ 0.5 Ω')
+        plt.savefig(f"resistance_{stave_label}_ch{channel}.png", dpi=300, format='png')
+        plt.close()
 
-    # Convert timestamps to datetime
-    vcon_df['timestamp'] = pd.to_datetime(vcon_df['timestamp'], unit='s')
-    vmon_df['timestamp'] = pd.to_datetime(vmon_df['timestamp'], unit='s')
-    imon_df['timestamp'] = pd.to_datetime(imon_df['timestamp'], unit='s')
-
-    # Plotting each graph
-    plt.figure(figsize=(10, 6))
+def separate_channels(input_file, output_base):
+    """Separate input file into channel-specific files"""
+    # Create dictionaries to store lines for each channel
+    channels = {
+        'channel008': [],
+        'channel009': [],
+        'channel010': [],
+        'channel011': []
+    }
     
-    plt.subplot(3, 1, 1)
-    plt.plot(vcon_df['timestamp'], vcon_df['value'], label='VCON', color='blue')
-    plt.title('VCON over Time')
-    plt.xlabel('Time')
-    plt.ylabel('VCON Value')
+    # Read input file and separate lines by channel
+    with open(input_file, 'r') as f:
+        for line in f:
+            for channel in channels.keys():
+                if channel in line:
+                    channels[channel].append(line)
+                    break
     
-    plt.subplot(3, 1, 2)
-    plt.plot(vmon_df['timestamp'], vmon_df['value'], label='VMON', color='green')
-    plt.title('VMON over Time')
-    plt.xlabel('Time')
-    plt.ylabel('VMON Value')
+    # Write separated files
+    for channel, lines in channels.items():
+        if lines:  # Only create file if there are lines for this channel
+            output_file = f"{output_base}_{channel}.txt"
+            with open(output_file, 'w') as f:
+                f.writelines(lines)
+            print(f"Created {output_file}")
+            
+    return channels.keys()
 
-    plt.subplot(3, 1, 3)
-    plt.plot(imon_df['timestamp'], imon_df['value'], label='IMON', color='red')
-    plt.title('IMON over Time')
-    plt.xlabel('Time')
-    plt.ylabel('IMON Value')
-
-    plt.tight_layout()
-    plt.savefig("VCON_VMON_IMON.png", dpi=300, format='png')
-
-def graph_resistance():
-    print("graphing resistance")
-    # Read the processed files
-    vcon_df = pd.read_csv("test_L5_31_vcon_processed.txt", sep=';', header=None, names=['timestamp', 'value'])
-    vmon_df = pd.read_csv("test_L5_31_vmon_processed.txt", sep=';', header=None, names=['timestamp', 'value'])
-    imon_df = pd.read_csv("test_L5_31_imon_processed.txt", sep=';', header=None, names=['timestamp', 'value'])
-
-    # Convert timestamps to datetime
-    vcon_df['timestamp'] = pd.to_datetime(vcon_df['timestamp'], unit='s')
-    vmon_df['timestamp'] = pd.to_datetime(vmon_df['timestamp'], unit='s')
-    imon_df['timestamp'] = pd.to_datetime(imon_df['timestamp'], unit='s')
-
-    # Merge dataframes on closest timestamps
-    # First merge: combines VCON and VMON based on closest timestamps
-    first_merge = pd.merge_asof(vcon_df.sort_values('timestamp'),  # First dataframe (VCON)
-                               vmon_df.sort_values('timestamp'),    # Second dataframe (VMON)
-                               on='timestamp',                      # Match on timestamp column
-                               suffixes=('_vcon', '_vmon'))        # Add suffixes to distinguish values
-
-    # Second merge: takes result of first merge and combines with IMON
-    merged_df = pd.merge_asof(first_merge,                        # Result of VCON+VMON merge
-                             imon_df.sort_values('timestamp'),     # IMON dataframe
-                             on='timestamp')                       # Match on timestamp column
-
-    # Result: merged_df now contains rows where timestamps are closely aligned
-    # Each row has: timestamp, value_vcon, value_vmon, value (IMON)
-    
-    # Calculate resistance: (VCON - VMON) / IMON
-    merged_df['resistance'] = (merged_df['value_vcon'] - merged_df['value_vmon']) / (merged_df['value'])
-
-    # Plot resistance
-    plt.figure(figsize=(10, 6))
-    plt.plot(merged_df['timestamp'], merged_df['resistance'], label='Resistance', color='purple')
-    plt.title('Cable Resistance over Time')
-    plt.xlabel('Time')
-    plt.ylabel('Resistance (Ω)')
-    plt.grid(True)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig("Resistance.png", dpi=300, format='png')
+def process_all_channels(input_file):
+    """Process and create resistance plots for each channel"""
+    print("Processing all channels directly from input file...")
+    # Process input file directly without creating temporary files
+    process_data(input_file)
 
 # Main execution
-VCON_conversion()
-VMON_conversion()
-IMON_conversion()
-graph_each()
-graph_resistance()
+if __name__ == "__main__":
+    input_file = get_input_file()
+    if not os.path.exists(input_file):
+        print(f"Error: File {input_file} not found")
+    else:
+        process_all_channels(input_file)
