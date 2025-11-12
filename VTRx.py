@@ -40,6 +40,8 @@ def VTRx_org():
     # Now apply the sed commands to the converted file
     reduced_file = "VTRx_reduced.txt"
     sed_cmd = f"sed 's/its.*:ITS\///g' {temp_file} | sed 's/\\/RU.monitoring.actual.SCA.I_/;/g' > {reduced_file}"
+    #slightly different format for the bot files
+    # sed_cmd = f"sed 's/its.*:ITS\///g' {temp_file} | sed 's/.monitoring.actual.SCA.I_/;/g' > {reduced_file}"
     subprocess.run(sed_cmd, shell=True)
     
     # Clean up temporary file
